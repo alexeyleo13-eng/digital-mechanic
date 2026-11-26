@@ -1,6 +1,6 @@
 fastapi==0.163.1
 uvicorn==0.54.0
-pydantic==2.14.3
+pydantic==2.12.5
 httpx==0.28.1
 python-dotenv==1.2.4
 anthropic==2.14.0

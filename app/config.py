@@ -23,6 +23,8 @@ _DEFAULT_MODEL = {"anthropic": "claude-opus-5-5", "gemini": "gemini-3.8-flash"}
 LLM_MODEL = _env("LLM_MODEL", _DEFAULT_MODEL.get(LLM_PROVIDER, ""))
 LLM_API_KEY = _env("LLM_API_KEY") or (_env("GEMINI_API_KEY") if LLM_PROVIDER == "gemini" else "")
 LLM_BASE_URL = _env("LLM_BASE_URL", GEMINI_BASE_URL if LLM_PROVIDER == "gemini" else "")
+LLM_FALLBACK_MODELS = [m.strip() for m in _env(
+    "LLM_FALLBACK_MODELS", "gemini-3.7-flash,gemini-3.5-flash-lite" if LLM_PROVIDER == "gemini" else "").split(",") if m.strip()]
 LLM_EFFORT = _env("LLM_EFFORT", "medium")  # Anthropic: effort; Gemini/OpenAI: reasoning_effort (пусто — не передавать)
 LLM_FALLBACKS = _env("LLM_FALLBACKS", "1") == "1"  # серверный fallback при отказе модели (Anthropic)
 LLM_MAX_STEPS = int(_env("LLM_MAX_STEPS", "8"))

@@ -5,6 +5,7 @@
   {"type": "delta", "text"} · {"type": "error", "text"} · {"type": "done"}
 """
 import json
+import re
 from collections.abc import Iterator
 
 from . import config
@@ -149,6 +150,50 @@ class OpenAICompatBackend:
         self.tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
                                                         "parameters": _portable_schema(t["parameters"])}} for t in TOOLS]
         self.extra = {"reasoning_effort": config.LLM_EFFORT} if config.LLM_PROVIDER == "gemini" and config.LLM_EFFORT else {}
+        self.models = [config.LLM_MODEL] + [m for m in config.LLM_FALLBACK_MODELS if m != config.LLM_MODEL]
+        self.client = self.client.with_options(max_retries=0, timeout=90)
+        self.cooldown: dict[str, float] = {}
+        self.notified: set[str] = set()
+
+    def _complete(self, messages: list) -> Iterator[dict]:
+        """Запрос с повторами при перегрузке (429/5xx, обрыв связи) и переходом на резервные модели.
+        Последний элемент — {"type": "_response", ...}."""
+        import time
+        last_error = "нет ответа"
+        now = time.time()
+        # Перегруженные модели пропускаем 3 минуты, чтобы не терять время на каждом шаге агента.
+        order = [m for m in self.models if self.cooldown.get(m, 0) <= now] or self.models[-1:]
+        for i, model in enumerate(order):
+            if i:
+                yield {"type": "status", "text": f"Модель {order[i - 1]} перегружена — переключаюсь на {model}"}
+            for attempt in range(2):
+                try:
+                    resp = self.client.chat.completions.create(model=model, messages=messages, tools=self.tools,
+                                                               tool_choice="auto", **self.extra)
+                    if model != self.models[0] and model not in self.notified:
+                        self.notified.add(model)
+                        yield {"type": "status", "text": f"Отвечает резервная модель {model}"}
+                    yield {"type": "_response", "resp": resp}
+                    return
+                except self.openai.APIStatusError as e:
+                    last_error = f"{e.status_code}: {_error_text(e)}"
+                    if e.status_code not in (429, 500, 502, 503, 504):
+                        yield {"type": "_response", "error": f"LLM вернула ошибку {last_error}"}
+                        return
+                    if e.status_code == 429:
+                        wait = re.search(r"retry in ([\d.]+)\s*s", last_error)
+                        is_last = model == order[-1]
+                        if is_last and wait and float(wait.group(1)) <= 40 and attempt == 0:
+                            secs = float(wait.group(1)) + 1
+                            yield {"type": "status", "text": f"Лимит запросов тарифа LLM — жду {secs:.0f} с"}
+                            time.sleep(secs)
+                            continue
+                        break  # квота модели исчерпана — сразу к следующей
+                except self.openai.APIConnectionError as e:
+                    last_error = f"нет связи ({e.__class__.__name__})"
+                time.sleep(1.5 * (attempt + 1))
+            self.cooldown[model] = time.time() + 180
+        yield {"type": "_response", "error": f"LLM недоступна, попробуйте ещё раз через минуту ({last_error})."}
 
     def run(self, conv: Conversation, text: str) -> Iterator[dict]:
         if conv.backend_state is None:
@@ -156,24 +201,25 @@ class OpenAICompatBackend:
         messages: list = conv.backend_state
         messages.append({"role": "user", "content": _user_text(conv, text)})
         for _ in range(config.LLM_MAX_STEPS):
-            try:
-                resp = self.client.chat.completions.create(model=config.LLM_MODEL, messages=messages, tools=self.tools,
-                                                           tool_choice="auto", **self.extra)
-            except self.openai.APIStatusError as e:
-                yield {"type": "error", "text": f"LLM вернула ошибку {e.status_code}: {_error_text(e)}"}
+            result = None
+            for ev in self._complete(messages):
+                if ev["type"] == "_response":
+                    result = ev
+                else:
+                    yield ev
+            if result.get("error"):
+                yield {"type": "error", "text": result["error"]}
                 return
-            except self.openai.APIConnectionError:
-                yield {"type": "error", "text": "Нет связи с LLM. Проверьте сеть и LLM_BASE_URL."}
-                return
+            resp = result["resp"]
             if not resp.choices:
                 yield {"type": "error", "text": "LLM вернула пустой ответ. Повторите вопрос."}
                 return
             msg = resp.choices[0].message
-            entry = {"role": "assistant", "content": msg.content or (None if msg.tool_calls else "")}
-            if msg.tool_calls:
-                entry["tool_calls"] = [{"id": c.id, "type": "function",
-                                        "function": {"name": c.function.name, "arguments": c.function.arguments}}
-                                       for c in msg.tool_calls]
+            # Сообщение возвращается целиком: Gemini кладёт в tool_calls служебные поля (extra_content.google.thought_signature),
+            # без которых следующий запрос отклоняется.
+            entry = msg.model_dump(exclude_none=True)
+            entry["role"] = "assistant"
+            entry.setdefault("content", None if msg.tool_calls else "")
             messages.append(entry)
             if msg.content:
                 yield {"type": "delta", "text": msg.content}
@@ -215,9 +261,20 @@ def backend():
 
 
 def run_turn(conv: Conversation, text: str) -> Iterator[dict]:
+    from .verify import unverified_values
     conv.last_user_text = text
+    answer = ""
     try:
-        yield from backend().run(conv, text)
+        for ev in backend().run(conv, text):
+            if ev["type"] == "delta":
+                answer += ev["text"]
+            yield ev
+        bad = unverified_values(answer, conv.retrieved, conv.diagnosis)
+        if bad:
+            yield {"type": "card", "kind": "unverified", "data": {"values": bad}}
+            # Модель узнает о замечании в следующем ходе и сможет его учесть.
+            conv.pending_notes.append("проверка ответа: значения " + ", ".join(bad) +
+                                      " не найдены на полученных страницах руководства — не повторяй их без источника")
     except Exception as e:  # демо не должно падать
         yield {"type": "error", "text": f"Внутренняя ошибка агента: {e.__class__.__name__}: {e}"}
     yield {"type": "done"}

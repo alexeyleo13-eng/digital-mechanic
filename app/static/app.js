@@ -181,6 +181,10 @@ function renderCard(turn, ev) {
   if (ev.kind === "diagnosis") { state.lastDiag = d; turn.append(diagnosisCard(d)); return; }
   if (ev.kind === "ticket_draft") { turn.append(ticketCard(d)); return; }
   if (ev.kind === "ticket_created") { turn.append(createdCard(d)); refreshVehicle(); return; }
+  if (ev.kind === "unverified") {
+    turn.append(el("div", "msg error", `⚠️ Не подтверждено руководством: <b>${d.values.map(esc).join(", ")}</b>. Не используйте эти значения без проверки по документации.`));
+    return;
+  }
   if (ev.kind === "history") return;
 }
 
@@ -246,7 +250,7 @@ function citeChip(mid, page) {
 
 function inline(s) {
   return esc(s)
-    .replace(/\[\[([a-z0-9_]+):(\d+)\]\]/g, (_, m, p) => citeChip(m, +p))
+    .replace(/\[{1,2}\s*([a-z][a-z0-9]*_[a-z0-9_]+)\s*:\s*([\d,;\s]+?)\s*\]{1,2}/g, (_, m, ps) => ps.split(/[,;\s]+/).filter(Boolean).map((p) => citeChip(m, +p)).join(""))
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/(^|[\s(])_(.+?)_(?=[\s).,;:!?]|$)/g, "$1<i>$2</i>")
     .replace(/`([^`]+)`/g, "<code>$1</code>");

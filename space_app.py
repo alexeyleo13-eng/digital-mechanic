@@ -13,6 +13,16 @@ os.environ.setdefault("PORT", "7860")
 os.environ.setdefault("PYTHONUNBUFFERED", "1")
 
 
+try:  # Space на ZeroGPU требует хотя бы одну функцию @spaces.GPU; GPU приложению не нужен
+    import spaces
+
+    @spaces.GPU
+    def _zero_gpu_placeholder() -> None:
+        pass
+except ImportError:
+    pass
+
+
 def _fetch_manuals() -> None:
     # PDF нужны только для кнопки «Открыть PDF»; индекс уже в репозитории, поэтому ошибка не критична.
     try:

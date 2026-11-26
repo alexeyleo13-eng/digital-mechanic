@@ -77,6 +77,10 @@ class AnthropicBackend:
                         if event.type == "text":
                             yield {"type": "delta", "text": event.text}
                     response = stream.get_final_message()
+                u = response.usage
+                yield {"type": "usage", "model": config.LLM_MODEL,
+                       "input": (u.input_tokens or 0) + (u.cache_read_input_tokens or 0) + (u.cache_creation_input_tokens or 0),
+                       "output": u.output_tokens or 0}
             except self.anthropic.APIStatusError as e:
                 messages.pop() if messages and messages[-1]["role"] == "user" and not _has_tool_results(messages[-1]) else None
                 yield {"type": "error", "text": f"LLM вернула ошибку {e.status_code}: {e.message}"}
@@ -173,6 +177,11 @@ class OpenAICompatBackend:
                     if model != self.models[0] and model not in self.notified:
                         self.notified.add(model)
                         yield {"type": "status", "text": f"Отвечает резервная модель {model}"}
+                    u = getattr(resp, "usage", None)
+                    if u:
+                        # Gemini не включает токены рассуждений в completion_tokens, но тарифицирует их как выход.
+                        out = max(u.completion_tokens or 0, (u.total_tokens or 0) - (u.prompt_tokens or 0))
+                        yield {"type": "usage", "model": model, "input": u.prompt_tokens or 0, "output": out}
                     yield {"type": "_response", "resp": resp}
                     return
                 except self.openai.APIStatusError as e:

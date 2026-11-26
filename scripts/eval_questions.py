@@ -27,6 +27,7 @@ CASES = [
                                                  "Создай заявку на дефектовку"]),
     ("С1: заявка", "M333YK47", ["Получить результат диагностики (проверка S-0005)", "Создай заявку на дефектовку"]),
 ]
+USAGE: list = []
 CITE = re.compile(r"\[{1,2}\s*([a-z][a-z0-9]*_[a-z0-9_]+)\s*:\s*(\d+)\s*\]{1,2}")
 
 
@@ -35,9 +36,12 @@ def run_case(title, vehicle_id, turns, out):
     out.append(f"\n## {title} — {vehicle_id} ({conv.engine})")
     for text in turns:
         t0 = time.time()
-        answer, tools, errors, cards = "", [], [], []
+        answer, tools, errors, cards, usage = "", [], [], [], []
         for ev in agent.run_turn(conv, text):
-            if ev["type"] == "tool":
+            if ev["type"] == "usage":
+                usage.append(ev)
+                USAGE.append({**ev, "case": title, "turn": text})
+            elif ev["type"] == "tool":
                 tools.append(f"{ev['name']}({', '.join(f'{k}={v}' for k, v in (ev.get('args') or {}).items() if k != 'references')})")
             elif ev["type"] == "delta":
                 answer += ev["text"]
@@ -68,6 +72,8 @@ def main():
         run_case(title, vid, turns, out)
         time.sleep(pause)
         print("\n".join(out[n:]), flush=True)
+    import json
+    (config.STATE_DIR / "usage.json").write_text(json.dumps(USAGE, ensure_ascii=False, indent=1), encoding="utf-8")
     dest = config.STATE_DIR / "eval.md"
     dest.write_text("\n".join(out), encoding="utf-8")
     print(f"\nСохранено: {dest}")

@@ -1,3 +1,16 @@
+---
+title: Цифровой механик
+emoji: 🔧
+colorFrom: blue
+colorTo: gray
+sdk: gradio
+sdk_version: 6.32.0
+python_version: "3.12"
+app_file: space_app.py
+pinned: false
+short_description: AI-агент для механика по руководствам двигателей
+---
+
 # Цифровой механик
 
 AI-агент для механика автопарка. Он получает результат акустической проверки двигателя от ML-сервиса «НейроДВС», объясняет отклонение и риск, отвечает на вопросы строго по заводскому руководству на двигатель выбранной машины со ссылкой на страницу PDF и по подтверждению механика оформляет заявку на дефектовку в ТОиР.
@@ -29,7 +42,9 @@ python -m scripts.build_index      # перестроить индекс; стр
 
 Docker: `docker build -t mechanic . && docker run -p 8000:8000 --env-file .env mechanic`. При сборке образ сам скачивает PDF, чтобы на стенде работала кнопка «Открыть PDF».
 
-**Стенд на Render.** В панели Render выберите New → Blueprint и укажите этот репозиторий: `render.yaml` создаст Docker-сервис во Франкфурте. Затем в Environment впишите `LLM_API_KEY`. Сервер должен быть вне РФ, потому что Gemini API недоступен с российских IP.
+**Стенд на Hugging Face Spaces (бесплатно).** Блок настроек в начале этого README — конфигурация Space: тип Gradio, точка входа `space_app.py`. Gradio не используется: `space_app.py` поднимает заглушки и приложение на порту 7860 и в фоне скачивает PDF. Создайте Space типа Gradio, в Settings → Variables and secrets добавьте секрет `LLM_API_KEY` и отправьте код: `git push https://huggingface.co/spaces/<владелец>/<space> main`. Сервер должен быть вне РФ, потому что Gemini API недоступен с российских IP.
+
+**Стенд на Render** (платный тариф): New → Blueprint, этот репозиторий, затем `LLM_API_KEY` в Environment — `render.yaml` создаст Docker-сервис во Франкфурте.
 
 ## Настройки (.env)
 

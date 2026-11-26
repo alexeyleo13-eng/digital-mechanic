@@ -112,8 +112,34 @@ def _has_tool_results(msg: dict) -> bool:
     return isinstance(msg.get("content"), list)
 
 
+def _error_text(e) -> str:
+    """Gemini отдаёт ошибку списком [{"error": {...}}], и SDK OpenAI не извлекает из него текст."""
+    body = e.body[0] if isinstance(e.body, list) and e.body else e.body
+    if isinstance(body, dict):
+        err = body.get("error", body)
+        if isinstance(err, dict) and err.get("message"):
+            return err["message"]
+    try:
+        return e.response.text[:300]
+    except Exception:
+        return str(e)
+
+
+_SCHEMA_DROP = {"additionalProperties", "minItems", "minimum"}
+
+
+def _portable_schema(node):
+    """Убирает ключи JSON Schema, которые поддерживают не все OpenAI-совместимые API (Gemini и др.).
+    Те же ограничения всё равно проверяются в инструментах."""
+    if isinstance(node, dict):
+        return {k: _portable_schema(v) for k, v in node.items() if k not in _SCHEMA_DROP}
+    if isinstance(node, list):
+        return [_portable_schema(v) for v in node]
+    return node
+
+
 class OpenAICompatBackend:
-    """Любой OpenAI-совместимый endpoint (OpenRouter, YandexGPT, GigaChat-прокси, Ollama, vLLM)."""
+    """Gemini (Google AI Studio) и любой OpenAI-совместимый endpoint (OpenRouter, YandexGPT, Ollama, vLLM)."""
 
     def __init__(self):
         from openai import OpenAI
@@ -121,7 +147,8 @@ class OpenAICompatBackend:
         self.openai = openai
         self.client = OpenAI(api_key=config.LLM_API_KEY or "none", base_url=config.LLM_BASE_URL or None)
         self.tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
-                                                        "parameters": t["parameters"]}} for t in TOOLS]
+                                                        "parameters": _portable_schema(t["parameters"])}} for t in TOOLS]
+        self.extra = {"reasoning_effort": config.LLM_EFFORT} if config.LLM_PROVIDER == "gemini" and config.LLM_EFFORT else {}
 
     def run(self, conv: Conversation, text: str) -> Iterator[dict]:
         if conv.backend_state is None:
@@ -131,15 +158,18 @@ class OpenAICompatBackend:
         for _ in range(config.LLM_MAX_STEPS):
             try:
                 resp = self.client.chat.completions.create(model=config.LLM_MODEL, messages=messages, tools=self.tools,
-                                                           tool_choice="auto")
+                                                           tool_choice="auto", **self.extra)
             except self.openai.APIStatusError as e:
-                yield {"type": "error", "text": f"LLM вернула ошибку {e.status_code}: {e.message}"}
+                yield {"type": "error", "text": f"LLM вернула ошибку {e.status_code}: {_error_text(e)}"}
                 return
             except self.openai.APIConnectionError:
                 yield {"type": "error", "text": "Нет связи с LLM. Проверьте сеть и LLM_BASE_URL."}
                 return
+            if not resp.choices:
+                yield {"type": "error", "text": "LLM вернула пустой ответ. Повторите вопрос."}
+                return
             msg = resp.choices[0].message
-            entry = {"role": "assistant", "content": msg.content or ""}
+            entry = {"role": "assistant", "content": msg.content or (None if msg.tool_calls else "")}
             if msg.tool_calls:
                 entry["tool_calls"] = [{"id": c.id, "type": "function",
                                         "function": {"name": c.function.name, "arguments": c.function.arguments}}

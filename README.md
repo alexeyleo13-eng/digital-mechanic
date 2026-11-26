@@ -34,9 +34,11 @@ Docker: `docker build -t mechanic . && docker run -p 8000:8000 --env-file .env m
 | Переменная | Назначение |
 |---|---|
 | `MOCK_ML_URL`, `MOCK_TOIR_URL` | адреса ML-сервиса и ТОиР; для боевого режима подставьте рабочие URL, код менять не нужно |
-| `LLM_PROVIDER` | `anthropic` (Claude, официальный SDK) или `openai` (любой OpenAI-совместимый endpoint: OpenRouter, YandexGPT, GigaChat через прокси, Ollama, vLLM) |
-| `LLM_MODEL`, `LLM_API_KEY`, `LLM_BASE_URL` | модель, ключ и адрес API |
-| `LLM_EFFORT` | глубина рассуждений Claude: `low`, `medium` (по умолчанию) или `high` |
+| `LLM_PROVIDER` | `gemini` (Google AI Studio, по умолчанию в `.env.example`), `anthropic` (Claude, официальный SDK) или `openai` (любой OpenAI-совместимый endpoint: OpenRouter, YandexGPT, Ollama, vLLM) |
+| `LLM_MODEL`, `LLM_API_KEY`, `LLM_BASE_URL` | модель, ключ и адрес API; для Gemini адрес подставляется сам |
+| `LLM_EFFORT` | глубина рассуждений: `low`, `medium` (по умолчанию) или `high` |
+
+Проверить ключ и модель: `python -m scripts.check_llm`. Скрипт выведет список доступных моделей и сделает пробный ход агента с вызовом инструмента; перед этим должны быть запущены заглушки.
 | `LLM_FALLBACKS` | `1` — если модель откажется отвечать, Anthropic сам перезапросит ответ у другой модели (beta-функция) |
 
 ## Как устроено
@@ -79,7 +81,7 @@ python -m pytest -q tests     # правила агента: сбой запис
 
 ## Что использовано (п. 4.8 Положения)
 
-Библиотеки: FastAPI, Uvicorn, Pydantic, httpx, python-dotenv, Anthropic Python SDK, OpenAI Python SDK, PyMuPDF, rank-bm25, snowballstemmer, NumPy, pytest; OCR — Tesseract (rus+eng). Модель по умолчанию — Claude Opus 5.5 (Anthropic API); поддерживается любой OpenAI-совместимый API. Заглушки ML и ТОиР, `vehicles.json`, `fault_types.json` и PDF-руководства предоставлены заказчиком (`mock_services/`). Ранее созданных наработок нет. Интерфейс написан на чистом HTML, CSS и JS без сборки.
+Библиотеки: FastAPI, Uvicorn, Pydantic, httpx, python-dotenv, Anthropic Python SDK, OpenAI Python SDK, PyMuPDF, rank-bm25, snowballstemmer, NumPy, pytest; OCR — Tesseract (rus+eng). Модель — Gemini через Google AI Studio (OpenAI-совместимый API); поддерживаются также Claude (Anthropic API) и любой OpenAI-совместимый API. Заглушки ML и ТОиР, `vehicles.json`, `fault_types.json` и PDF-руководства предоставлены заказчиком (`mock_services/`). Ранее созданных наработок нет. Интерфейс написан на чистом HTML, CSS и JS без сборки.
 
 ## Ограничения
 

@@ -27,7 +27,9 @@ python -m scripts.fetch_manuals    # скачать 6 PDF с Яндекс Дис
 python -m scripts.build_index      # перестроить индекс; страницы-сканы распознаются Tesseract (rus+eng), если он установлен
 ```
 
-Docker: `docker build -t mechanic . && docker run -p 8000:8000 --env-file .env mechanic`.
+Docker: `docker build -t mechanic . && docker run -p 8000:8000 --env-file .env mechanic`. При сборке образ сам скачивает PDF, чтобы на стенде работала кнопка «Открыть PDF».
+
+**Стенд на Render.** В панели Render выберите New → Blueprint и укажите этот репозиторий: `render.yaml` создаст Docker-сервис во Франкфурте. Затем в Environment впишите `LLM_API_KEY`. Сервер должен быть вне РФ, потому что Gemini API недоступен с российских IP.
 
 ## Настройки (.env)
 

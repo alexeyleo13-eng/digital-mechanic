@@ -7,3 +7,6 @@ data/manuals/*.pdf
 data/state/
 materials/
 .pytest_cache/
+
+# видео и материалы для формы сдачи (загружаются в облако вручную)
+сдача/

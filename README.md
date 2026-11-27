@@ -17,6 +17,8 @@ AI-агент для механика автопарка. Он получает 
 
 Хакатон «ИИкузница», трек «Цифровой аватар», 26–28.11.2026.
 
+**Стенд:** https://smartleoai-digital-mechanic.hf.space. Если стенд долго не открывали, первая загрузка занимает 1–2 минуты.
+
 ## Запуск за 5 минут
 
 Нужен Python 3.10+.
@@ -42,7 +44,7 @@ python -m scripts.build_index      # перестроить индекс; стр
 
 Docker: `docker build -t mechanic . && docker run -p 8000:8000 --env-file .env mechanic`. При сборке образ сам скачивает PDF, чтобы на стенде работала кнопка «Открыть PDF».
 
-**Стенд на Hugging Face Spaces (бесплатно).** Блок настроек в начале этого README — конфигурация Space: тип Gradio, точка входа `space_app.py`. Gradio не используется: `space_app.py` поднимает заглушки и приложение на порту 7860 и в фоне скачивает PDF. Создайте Space типа Gradio, в Settings → Variables and secrets добавьте секрет `LLM_API_KEY` и отправьте код: `git push https://huggingface.co/spaces/<владелец>/<space> main`. Сервер должен быть вне РФ, потому что Gemini API недоступен с российских IP.
+**Стенд на Hugging Face Spaces (бесплатно).** Блок настроек в начале этого README — конфигурация Space: тип Gradio, точка входа `space_app.py`. Gradio не используется: `space_app.py` поднимает заглушки и приложение на порту 7860 и в фоне скачивает PDF. Бесплатный Space типа Gradio работает на ZeroGPU, поэтому `space_app.py` объявляет пустую функцию `@spaces.GPU` и отправляет платформе отчёт о запуске; GPU приложение не использует. Создайте Space типа Gradio, в Settings → Variables and secrets добавьте секрет `LLM_API_KEY` и отправьте код: `git push https://huggingface.co/spaces/<владелец>/<space> main`. Сервер должен быть вне РФ, потому что Gemini API недоступен с российских IP.
 
 **Стенд на Render** (платный тариф): New → Blueprint, этот репозиторий, затем `LLM_API_KEY` в Environment — `render.yaml` создаст Docker-сервис во Франкфурте.
 

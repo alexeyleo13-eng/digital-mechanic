@@ -201,6 +201,7 @@ function diagnosisCard(d) {
     <div>${esc(r.description)}</div>
     ${r.status !== "check_failed" ? `<div class="metrics">${metric("Отклонение", r.anomaly_score?.toFixed(2) ?? "—", r.anomaly_score)}${metric("Уверенность", pct(r.confidence), r.confidence)}${metric("Запись", Q_RU[r.signal_quality] || r.signal_quality)}</div>` : ""}
     <div class="action">${esc(a.action)}</div>
+    ${r.status === "anomaly" ? `<p class="muted">Порог уверенности для заявки: ${String(a.confidence_min ?? 0.5).replace(".", ",")}${a.ticket_allowed === false ? " — заявка не оформляется" : ""}</p>` : ""}
     ${(a.notes || []).length ? `<ul class="notes">${a.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
     ${a.compatibility && !a.compatibility.compatible ? `<p class="muted">${esc(a.compatibility.reason)}</p>` : ""}
     ${a.basis ? `<details class="basis"><summary>Приоритет: ${URG_RU[a.urgency]} — на чём основан</summary><ul>${a.basis.map((b) => `<li>${esc(b)}</li>`).join("")}</ul></details>` : ""}
@@ -216,16 +217,26 @@ function ticketCard(d) {
     <dl><dt>ТС</dt><dd><b>${esc(t.vehicle_id)}</b>, проверка ${esc(t.session_id)}</dd>
     <dt>Неисправность</dt><dd>${esc(t.anomaly_type)} · ${esc(d.anomaly_title)}</dd>
     <dt>Диагноз</dt><dd>${esc(t.conclusion)}</dd>
-    <dt>Приоритет</dt><dd><span class="pill ${t.urgency}">${URG_RU[t.urgency]}</span></dd>
+    <dt>Приоритет</dt><dd><select class="prio">${["high", "medium", "low"].map((u) => `<option value="${u}"${u === t.urgency ? " selected" : ""}>${URG_RU[u]}${u === d.proposed_urgency ? " (предложен)" : ""}</option>`).join("")}</select>
+      <div class="muted prio-hint"></div></dd>
     <dt>Работы</dt><dd><ul>${t.operations.map((o) => `<li>${esc(o)}</li>`).join("")}</ul></dd>
     <dt>Запчасти</dt><dd>${t.spare_parts.length ? `<ul>${t.spare_parts.map((o) => `<li>${esc(o)}</li>`).join("")}</ul>` : "—"}</dd>
     <dt>Источники</dt><dd>${t.references.map((r, i) => citeChip(d.ref_ids[i], r.pdf_page)).join(" ")}</dd></dl>
+    ${d.warning ? `<label class="warn-ack"><input type="checkbox"> Запись с помехами: я видел предупреждение и подтверждаю заявку осознанно</label>` : ""}
     <div class="row-btns"><button class="edit">Изменить</button><button class="go">Отправить в ТОиР</button></div>`;
-  $(".go", c).addEventListener("click", async (e) => {
+  const sel = $(".prio", c), hint = $(".prio-hint", c), go = $(".go", c), ack = $(".warn-ack input", c);
+  const meaning = d.priority_meaning || {};
+  const upd = () => {
+    hint.textContent = (meaning[sel.value] || "") + (sel.value !== d.proposed_urgency ? ` · изменён механиком, агент предлагал «${URG_RU[d.proposed_urgency]}»` : "");
+    go.disabled = !!ack && !ack.checked;
+  };
+  sel.addEventListener("change", upd); ack?.addEventListener("change", upd); upd();
+  go.addEventListener("click", async (e) => {
     e.target.disabled = true; e.target.textContent = "Отправляю…";
     try {
       const out = await api("/api/ticket/confirm", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_id: state.conversationId, draft_id: d.draft_id }) });
+        body: JSON.stringify({ conversation_id: state.conversationId, draft_id: d.draft_id, urgency: sel.value, warning_ack: !!ack?.checked }) });
+      sel.disabled = true; if (ack) ack.disabled = true;
       $(".row-btns", c).replaceWith(createdCard(out)); refreshVehicle();
     } catch (err) { e.target.disabled = false; e.target.textContent = "Отправить в ТОиР"; c.append(el("div", "msg error", esc(err.message))); }
   });
@@ -302,6 +313,7 @@ function renderChips() {
   const d = state.lastDiag;
   let chips;
   if (!d) chips = [["Получить результат диагностики", true], ["Покажи историю проверок"], ["Какое давление масла должно быть?"]];
+  else if (d.ml_result.status === "anomaly" && d.assessment.ticket_allowed === false) chips = [["Почему заявка не оформляется?", true], ["Как правильно сделать запись?"], ["Покажи историю проверок"]];
   else if (d.ml_result.status === "anomaly") chips = [["Создать заявку на дефектовку", true], ["Почему это опасно?"], ["Можно ли своим ходом перегнать на базу?"], ["Как проверить по руководству?"], ["Какие запчасти могут понадобиться?"]];
   else if (d.ml_result.status === "check_failed") chips = [["Как правильно сделать запись?"], ["Покажи историю проверок"]];
   else chips = [["Покажи историю проверок"], ["Что проверить на ближайшем ТО?"]];

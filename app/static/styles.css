@@ -102,6 +102,11 @@ details.basis ul { margin: 6px 0 0; padding-left: 18px; }
 .ticket h4 { margin: 0 0 8px; font-size: 16px; }
 .ticket dl { display: grid; grid-template-columns: 96px 1fr; gap: 4px 10px; margin: 0 0 10px; font-size: 14px; }
 .ticket dt { color: var(--ink-2); } .ticket dd { margin: 0; }
+.ticket select.prio { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.ticket .prio-hint { font-size: 13px; margin-top: 4px; }
+.ticket .warn-ack { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; padding: 10px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); font-size: 14px; }
+.ticket .warn-ack input { margin-top: 3px; }
+.row-btns .go:disabled { opacity: .5; }
 .ticket ul { margin: 0; padding-left: 18px; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
 .pill.high { background: var(--bad-bg); color: var(--bad); } .pill.medium { background: var(--warn-bg); color: var(--warn); } .pill.low { background: var(--ok-bg); color: var(--ok); }

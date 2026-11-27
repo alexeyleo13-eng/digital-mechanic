@@ -28,6 +28,8 @@ class ChatIn(BaseModel):
 class ConfirmIn(BaseModel):
     conversation_id: str
     draft_id: str
+    urgency: str | None = None
+    warning_ack: bool = False
 
 
 def _session_brief(s: dict | None) -> dict | None:
@@ -105,10 +107,14 @@ def confirm_ticket(body: ConfirmIn):
     if not conv or not conv.draft or conv.draft["draft_id"] != body.draft_id:
         raise HTTPException(409, "Черновик заявки устарел — подготовьте заявку заново")
     try:
-        out = submit_draft(conv)
+        proposed = conv.draft.get("proposed_urgency")
+        out = submit_draft(conv, urgency=body.urgency, warning_ack=body.warning_ack)
     except ToolError as e:
-        raise HTTPException(502, str(e)) from e
-    conv.pending_notes.append(f"механик подтвердил, заявка {out['ticket_id']} создана в ТОиР")
+        raise HTTPException(422 if "помехами" in str(e) or "приоритет" in str(e) else 502, str(e)) from e
+    note = f"механик подтвердил, заявка {out['ticket_id']} создана в ТОиР с приоритетом {out['ticket']['urgency']}"
+    if proposed and out["ticket"]["urgency"] != proposed:
+        note += f" (механик изменил предложенный приоритет {proposed})"
+    conv.pending_notes.append(note)
     return out
 
 

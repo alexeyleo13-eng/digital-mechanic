@@ -84,6 +84,14 @@ def compatibility(engine_model: str, code: str | None) -> dict:
     return {"compatible": True}
 
 
+CONFIDENCE_MIN = 0.50  # ниже — заявка не оформляется, нужна повторная запись (гипотеза команды, принята организаторами)
+PRIORITY_MEANING = {
+    "high": "дефектовка до выпуска в рейс",
+    "medium": "дефектовка на ближайшем ТО, машина работает под наблюдением",
+    "low": "узел проверяется на следующей проверке",
+}
+
+
 def assess(result: dict, engine_model: str) -> dict:
     """Детерминированная оценка риска и приоритета — агент её объясняет, но не пересчитывает."""
     status = result.get("status")
@@ -111,13 +119,18 @@ def assess(result: dict, engine_model: str) -> dict:
         f"Оценка отклонения anomaly_score = {score:.2f}" + (" — высокая (≥ 0,80)" if score >= 0.8 else
                                                            " — заметная (≥ 0,65)" if score >= 0.65 else " — умеренная"),
         f"Уверенность модели {conf:.0%}, качество записи: {quality}",
-        "Правило: высокий — критичный узел или score ≥ 0,80; средний — важный узел или score ≥ 0,65; иначе низкий.",
+        "Правило: базовая критичность узла (критичный → высокий, важный → средний, прочие → низкий), "
+        "поправка по оценке: score ≥ 0,80 поднимает до высокого, ≥ 0,65 — до среднего. Окончательный приоритет выбирает механик.",
     ]
     notes = []
     if quality == "warning":
         notes.append("Запись с помехами: уверенность модели снижена, рекомендуется повторная запись для подтверждения.")
-    if conf < 0.6:
-        notes.append("Низкая уверенность модели (< 0,6): вывод предварительный.")
+    ticket_allowed, ticket_block = True, None
+    if conf < CONFIDENCE_MIN:
+        ticket_allowed = False
+        ticket_block = (f"Уверенность модели {conf:.0%} ниже порога 0,50: заявка не оформляется. "
+                        "Повторите запись; если отклонение подтвердится с достаточной уверенностью — оформите заявку.")
+        notes.append(ticket_block)
     compat = compatibility(engine_model, code)
     if not compat["compatible"]:
         notes.append("Тип неисправности не соответствует конструкции двигателя: возможна ошибка классификации.")
@@ -125,15 +138,23 @@ def assess(result: dict, engine_model: str) -> dict:
         return {"verdict": "anomaly", "risk": "не определён", "urgency": "medium", "criticality": crit,
                 "action": "Повторить запись. Если отклонение подтвердится — общая дефектовка двигателя: "
                           "инструкции по этому типу в руководстве на двигатель нет.",
-                "basis": basis, "notes": notes, "compatibility": compat}
+                "basis": basis, "notes": notes, "compatibility": compat, "warning": quality == "warning",
+                "ticket_allowed": False,
+                "ticket_block": "В руководстве на этот двигатель нет инструкции по найденному типу неисправности: "
+                                "результат похож на ошибку классификации, заявка в ТОиР не отправляется.",
+                "confidence_min": CONFIDENCE_MIN}
     risk = {"high": "высокий", "medium": "средний", "low": "низкий"}[urgency]
     action = {
-        "high": "Не выпускать в рейс до дефектовки. Оформить заявку на дефектовку.",
+        "high": "Рекомендация: дефектовка до выпуска в рейс. Оформить заявку на дефектовку.",
         "medium": "Провести проверки по руководству в ближайшее ТО, оформить заявку на дефектовку.",
         "low": "Проверить при плановом ТО, наблюдать динамику.",
     }[urgency]
+    if not ticket_allowed:
+        action = "Повторить запись для подтверждения: уверенность модели ниже порога 0,50, заявка пока не оформляется."
     return {"verdict": "anomaly", "risk": risk, "urgency": urgency, "criticality": crit,
-            "action": action, "basis": basis, "notes": notes, "compatibility": compat}
+            "action": action, "basis": basis, "notes": notes, "compatibility": compat,
+            "warning": quality == "warning", "ticket_allowed": ticket_allowed, "ticket_block": ticket_block,
+            "confidence_min": CONFIDENCE_MIN}
 
 
 def fleet_status(v: dict) -> str:

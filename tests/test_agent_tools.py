@@ -2,7 +2,7 @@
 import pytest
 
 from app import domain, rag, services
-from app.tools import Conversation, ToolError, execute
+from app.tools import Conversation, ToolError, execute, submit_draft
 
 pytestmark = pytest.mark.skipif(not all(services.health().values()), reason="заглушки ML/ТОиР не запущены")
 
@@ -45,7 +45,7 @@ def test_ticket_requires_retrieved_references_and_reaches_toir():
     manual_id = hits["results"][0]["cite"].strip("[]").split(":")[0]
     args["references"] = [{"manual_id": manual_id, "pdf_page": page}]
     data, _ = execute(conv, "prepare_ticket", args)
-    assert data["draft"]["urgency"] == "medium"  # не ниже расчётного
+    assert data["draft"]["urgency"] == "medium"  # агент предлагает не ниже расчётного
     conv.last_user_text = "Да, отправляй"
     out, _ = execute(conv, "submit_ticket", {})
     assert out["ticket_id"].startswith("TKT-")
@@ -63,3 +63,30 @@ def test_other_engine_manual_is_rejected():
     conv = Conversation(vehicle_id="M333YK47")
     with pytest.raises(ToolError):
         execute(conv, "search_manuals", {"query": "зазор", "manual_id": "zmz409_rk"})
+
+
+def test_low_confidence_blocks_ticket():
+    conv = Conversation(vehicle_id="M739BA198")
+    data, _ = execute(conv, "get_diagnosis", {"session_id": "S-0103"})  # confidence 0,48 < порога 0,50
+    a = data["assessment"]
+    assert a["ticket_allowed"] is False and a["confidence_min"] == 0.5
+    with pytest.raises(ToolError, match="0,50"):
+        execute(conv, "prepare_ticket", {"conclusion": "x", "urgency": "medium", "operations": ["x"], "spare_parts": [],
+                                         "references": [{"manual_id": "zmz5234_rk", "pdf_page": 10}]})
+
+
+def test_warning_ticket_needs_ack_and_mechanic_sets_priority():
+    conv = Conversation(vehicle_id="O658MX98")
+    data, _ = execute(conv, "get_diagnosis", {"session_id": "S-0063"})  # warning, confidence 0,53
+    assert data["assessment"]["warning"] is True and data["assessment"]["ticket_allowed"] is True
+    hits, _ = execute(conv, "search_manuals", {"query": "проверка давления масла контрольным манометром"})
+    r = hits["results"][0]
+    data, _ = execute(conv, "prepare_ticket", {
+        "conclusion": "Проверка системы смазки", "urgency": "low", "operations": ["Проверить давление масла"],
+        "spare_parts": [], "references": [{"manual_id": r["cite"].strip("[]").split(":")[0], "pdf_page": r["pdf_page"]}]})
+    proposed = data["draft"]["urgency"]
+    conv.last_user_text = "Да, отправляй"
+    with pytest.raises(ToolError, match="помехами"):
+        execute(conv, "submit_ticket", {})
+    out = submit_draft(conv, urgency="low", warning_ack=True)
+    assert out["ticket"]["urgency"] == "low" and proposed != "low"

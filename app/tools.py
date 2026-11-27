@@ -221,6 +221,8 @@ def _prepare_ticket(conv: Conversation, args: dict) -> tuple[dict, list[dict]]:
     if not compat.get("compatible", True):
         raise ToolError("Тип неисправности не соответствует двигателю, инструкции в руководстве нет — заявку в ТОиР не отправляем. "
                         "Сообщите механику и порекомендуйте повторную запись и общую дефектовку. " + compat.get("reason", ""))
+    if not d["assessment"].get("ticket_allowed", True):
+        raise ToolError(d["assessment"].get("ticket_block") or "Заявка по этой проверке не оформляется")
     ops = [o.strip() for o in args.get("operations", []) if o and o.strip()]
     if not ops:
         raise ToolError("Нужен хотя бы один пункт работ")
@@ -239,7 +241,7 @@ def _prepare_ticket(conv: Conversation, args: dict) -> tuple[dict, list[dict]]:
     urgency = args.get("urgency") or d["assessment"].get("urgency") or "medium"
     min_urg = d["assessment"].get("urgency")
     if min_urg and not domain.urgency_ge(urgency, min_urg):
-        urgency = min_urg  # приоритет не ниже расчётного
+        urgency = min_urg  # агент предлагает не ниже расчётного; окончательно выбирает механик в карточке
     draft = {
         "draft_id": uuid.uuid4().hex[:8],
         "ticket": {
@@ -254,6 +256,9 @@ def _prepare_ticket(conv: Conversation, args: dict) -> tuple[dict, list[dict]]:
         },
         "ref_ids": [r["manual_id"] for r in refs],
         "anomaly_title": res["anomaly_title"],
+        "proposed_urgency": urgency,
+        "priority_meaning": domain.PRIORITY_MEANING,
+        "warning": bool(d["assessment"].get("warning")),
         "existing": [t["ticket_id"] for t in domain.tickets(res["vehicle_id"]) if t["session_id"] == res["session_id"]],
     }
     conv.draft = draft
@@ -262,15 +267,24 @@ def _prepare_ticket(conv: Conversation, args: dict) -> tuple[dict, list[dict]]:
             [{"kind": "ticket_draft", "data": draft}])
 
 
-def submit_draft(conv: Conversation) -> dict:
+def submit_draft(conv: Conversation, urgency: str | None = None, warning_ack: bool = False) -> dict:
+    """Отправка черновика по подтверждению механика. Механик может сменить приоритет;
+    при записи с помехами нужно отдельное подтверждение, что он видел предупреждение."""
     if not conv.draft:
         raise ToolError("Нет подготовленного черновика заявки")
-    ticket = conv.draft["ticket"]
+    if conv.draft.get("warning") and not warning_ack:
+        raise ToolError("Запись с помехами: подтвердите в карточке заявки, что видели предупреждение, и отправьте заявку кнопкой.")
+    ticket = dict(conv.draft["ticket"])
+    if urgency:
+        if urgency not in domain.PRIORITY_MEANING:
+            raise ToolError(f"Недопустимый приоритет: {urgency}")
+        ticket["urgency"] = urgency
     try:
         resp = services.create_ticket(ticket)
     except services.ServiceError as e:
         raise ToolError(f"ТОиР отклонил заявку: {e.detail}") from e
-    domain.save_ticket({**ticket, "ticket_id": resp["ticket_id"], "anomaly_title": conv.draft["anomaly_title"]})
+    domain.save_ticket({**ticket, "ticket_id": resp["ticket_id"], "anomaly_title": conv.draft["anomaly_title"],
+                        "proposed_urgency": conv.draft.get("proposed_urgency"), "warning_ack": bool(warning_ack)})
     conv.draft = None
     return {"ticket_id": resp["ticket_id"], "status": resp.get("status"), "ticket": ticket}
 
